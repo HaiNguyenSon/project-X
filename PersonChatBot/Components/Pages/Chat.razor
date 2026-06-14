@@ -1,0 +1,215 @@
+@page "/"
+@rendermode InteractiveServer
+@using Microsoft.Extensions.Options
+@using PersonChatBot.Configuration
+@inject ChatService ChatService
+@inject IndexingService Indexing
+@inject IVectorStore Store
+@inject IOptions<RagOptions> Options
+@inject ILogger<Chat> Logger
+@implements IDisposable
+
+<PageTitle>Document Chat</PageTitle>
+
+<div class="chat-layout">
+    <div class="chat-main">
+        <div class="chat-thread">
+            @if (_messages.Count == 0)
+            {
+                <div class="chat-empty">
+                    <h2>Ask your documents</h2>
+                    <p>Questions are answered only from the files in your watched folder, with citations.</p>
+                </div>
+            }
+            @foreach (var msg in _messages)
+            {
+                <div class="chat-bubble @(msg.Author == ChatAuthor.User ? "user" : "assistant") @(msg.IsError ? "error" : "")">
+                    <div class="chat-text">@msg.Text</div>
+                    @if (msg.Sources.Count > 0)
+                    {
+                        <div class="chat-sources">
+                            <span class="chat-sources-label">Sources</span>
+                            @for (var i = 0; i < msg.Sources.Count; i++)
+                            {
+                                var s = msg.Sources[i];
+                                <span class="chat-source" title="@s.Text">
+                                    [@(i + 1)] @s.FileName@(s.Page > 0 ? $" p.{s.Page}" : "")
+                                    <span class="chat-score">@s.Score.ToString("0.00")</span>
+                                </span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+            @if (_busy && _streamingEmpty)
+            {
+                <div class="chat-bubble assistant"><em>Thinking…</em></div>
+            }
+        </div>
+
+        <div class="chat-input">
+            <textarea @bind="_input" @bind:event="oninput" @onkeydown="OnKeyDown"
+                      placeholder="Ask a question about your documents…"
+                      rows="2" disabled="@_busy"></textarea>
+            @if (_busy)
+            {
+                <button class="btn btn-secondary" @onclick="Stop">Stop</button>
+            }
+            else
+            {
+                <button class="btn btn-primary" @onclick="Send" disabled="@string.IsNullOrWhiteSpace(_input)">Send</button>
+            }
+        </div>
+    </div>
+
+    <aside class="chat-status">
+        <h3>Index status</h3>
+        <dl>
+            <dt>Documents</dt>
+            <dd>@(_stats?.FileCount ?? 0)</dd>
+            <dt>Chunks</dt>
+            <dd>@(_stats?.ChunkCount ?? 0)</dd>
+            <dt>Last indexed</dt>
+            <dd>@(_stats?.LastIndexedAt?.LocalDateTime.ToString("g") ?? "never")</dd>
+        </dl>
+        <p class="chat-folder" title="@Indexing.DocumentsFolder">@Indexing.DocumentsFolder</p>
+        <button class="btn btn-outline-primary" @onclick="Reindex" disabled="@_reindexing">
+            @(_reindexing ? "Reindexing…" : "Reindex now")
+        </button>
+        @if (_reindexReport is not null)
+        {
+            <p class="chat-reindex-report">
+                +@_reindexReport.FilesIndexed indexed, @_reindexReport.FilesSkipped unchanged,
+                @_reindexReport.FilesRemoved removed.
+                @if (_reindexReport.Errors.Count > 0)
+                {
+                    <span class="chat-errors">@_reindexReport.Errors.Count error(s)</span>
+                }
+            </p>
+        }
+    </aside>
+</div>
+
+@code {
+    private readonly List<Message> _messages = new();
+    private string _input = string.Empty;
+    private bool _busy;
+    private bool _streamingEmpty;
+    private bool _reindexing;
+    private IndexStats? _stats;
+    private IndexReport? _reindexReport;
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync() => await RefreshStats();
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        // Enter sends; Shift+Enter inserts a newline.
+        if (e.Key == "Enter" && !e.ShiftKey && !_busy)
+            await Send();
+    }
+
+    private async Task Send()
+    {
+        var question = _input.Trim();
+        if (question.Length == 0 || _busy)
+            return;
+
+        _input = string.Empty;
+        _busy = true;
+        _streamingEmpty = true;
+
+        var history = _messages
+            .Where(m => !m.IsError)
+            .Select(m => new ChatTurn(m.Author, m.Text))
+            .ToList();
+
+        _messages.Add(new Message { Author = ChatAuthor.User, Text = question });
+        var answer = new Message { Author = ChatAuthor.Assistant, Text = string.Empty };
+
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+
+        try
+        {
+            var context = await ChatService.RetrieveContextAsync(question, ct);
+            answer.Sources = context.ToList();
+
+            await foreach (var token in ChatService.StreamAnswerAsync(question, history, context, ct))
+            {
+                if (_streamingEmpty)
+                {
+                    _streamingEmpty = false;
+                    _messages.Add(answer);
+                }
+                answer.Text += token;
+                StateHasChanged();
+            }
+
+            if (_streamingEmpty) // never produced a token
+            {
+                answer.Text = ChatService.NoContextMessage;
+                _messages.Add(answer);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (answer.Text.Length == 0) answer.Text = "(stopped)";
+            if (!_messages.Contains(answer)) _messages.Add(answer);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Chat failed.");
+            answer.Text = $"Error contacting the local model: {ex.Message}. " +
+                          $"Is Ollama running at {Options.Value.OllamaEndpoint}?";
+            answer.IsError = true;
+            if (!_messages.Contains(answer)) _messages.Add(answer);
+        }
+        finally
+        {
+            _busy = false;
+            _streamingEmpty = false;
+            _cts?.Dispose();
+            _cts = null;
+            StateHasChanged();
+        }
+    }
+
+    private void Stop() => _cts?.Cancel();
+
+    private async Task Reindex()
+    {
+        _reindexing = true;
+        _reindexReport = null;
+        try
+        {
+            _reindexReport = await Indexing.ReindexAllAsync();
+            await RefreshStats();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Reindex failed.");
+            _reindexReport = new IndexReport(0, 0, 0, 0, new[] { ex.Message });
+        }
+        finally
+        {
+            _reindexing = false;
+        }
+    }
+
+    private async Task RefreshStats()
+    {
+        try { _stats = await Store.GetStatsAsync(); }
+        catch (Exception ex) { Logger.LogError(ex, "Failed to load index stats."); }
+    }
+
+    public void Dispose() => _cts?.Cancel();
+
+    private sealed class Message
+    {
+        public ChatAuthor Author { get; init; }
+        public string Text { get; set; } = string.Empty;
+        public List<SearchHit> Sources { get; set; } = new();
+        public bool IsError { get; set; }
+    }
+}
