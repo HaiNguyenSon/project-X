@@ -11,6 +11,9 @@ namespace PersonChatBot.Auth;
 /// <summary>Minimal, no-JavaScript login/logout endpoints backed by a cookie.</summary>
 public static class AuthEndpoints
 {
+    /// <summary>Name of the rate-limiting policy applied to the login POST.</summary>
+    public const string LoginRateLimitPolicy = "login";
+
     public static void MapAuthEndpoints(this WebApplication app)
     {
         app.MapGet("/login", (HttpContext ctx) =>
@@ -42,7 +45,7 @@ public static class AuthEndpoints
                 new AuthenticationProperties { IsPersistent = true });
 
             return Results.Redirect("/");
-        }).AllowAnonymous().DisableAntiforgery();
+        }).AllowAnonymous().DisableAntiforgery().RequireRateLimiting(LoginRateLimitPolicy);
 
         app.MapPost("/logout", async (HttpContext ctx) =>
         {

@@ -1,4 +1,6 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.SemanticKernel;
 using PersonChatBot.Auth;
 using PersonChatBot.Chat;
@@ -65,6 +67,21 @@ if (authOptions.Enabled)
         });
     builder.Services.AddAuthorization();
     builder.Services.AddCascadingAuthenticationState();
+
+    // Throttle login attempts per client IP to slow password guessing.
+    builder.Services.AddRateLimiter(rateLimiter =>
+    {
+        rateLimiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        rateLimiter.AddPolicy(AuthEndpoints.LoginRateLimitPolicy, httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 5,
+                    Window = TimeSpan.FromMinutes(5),
+                    QueueLimit = 0,
+                }));
+    });
 }
 
 var app = builder.Build();
@@ -83,8 +100,14 @@ app.UseStaticFiles();
 
 if (authOptions.Enabled)
 {
+    app.UseRateLimiter();
     app.UseAuthentication();
     app.UseAuthorization();
+
+    if (authOptions.Password.Length < 12)
+        app.Logger.LogWarning(
+            "Auth password is shorter than 12 characters. Use a long passphrase before " +
+            "exposing the app, even over Tailscale.");
 }
 
 app.UseAntiforgery();
