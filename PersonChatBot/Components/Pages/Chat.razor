@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@using System.Diagnostics
 @using Microsoft.Extensions.Options
 @using PersonChatBot.Configuration
 @inject ChatService ChatService
@@ -135,20 +136,28 @@
             var context = await ChatService.RetrieveContextAsync(question, ct);
             answer.Sources = context.ToList();
 
+            var renderTimer = Stopwatch.StartNew();
             await foreach (var token in ChatService.StreamAnswerAsync(question, history, context, ct))
             {
                 if (_streamingEmpty)
                 {
                     _streamingEmpty = false;
                     _messages.Add(answer);
+                    StateHasChanged(); // show the answer bubble as soon as the first token arrives
                 }
                 answer.Text += token;
-                StateHasChanged();
+
+                // Throttle re-renders so a fast token stream doesn't flood the SignalR circuit.
+                if (renderTimer.ElapsedMilliseconds >= 80)
+                {
+                    StateHasChanged();
+                    renderTimer.Restart();
+                }
             }
 
-            if (_streamingEmpty) // never produced a token
+            if (_streamingEmpty) // context existed (no-context is handled in the stream) but the model returned nothing
             {
-                answer.Text = ChatService.NoContextMessage;
+                answer.Text = "The model returned an empty response. Please try again.";
                 _messages.Add(answer);
             }
         }
