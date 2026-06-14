@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.SemanticKernel;
 using PersonChatBot.Auth;
@@ -68,6 +69,17 @@ if (authOptions.Enabled)
     builder.Services.AddAuthorization();
     builder.Services.AddCascadingAuthenticationState();
 
+    // Behind `tailscale serve` the app is reached over HTTPS but receives plain
+    // HTTP on localhost. Honor X-Forwarded-Proto so the request is seen as HTTPS,
+    // which makes the auth cookie Secure. Only the local Tailscale proxy reaches
+    // the app (it binds to localhost), so trusting the forwarded headers is safe.
+    builder.Services.Configure<ForwardedHeadersOptions>(forwarded =>
+    {
+        forwarded.ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor;
+        forwarded.KnownNetworks.Clear();
+        forwarded.KnownProxies.Clear();
+    });
+
     // Throttle login attempts per client IP to slow password guessing.
     builder.Services.AddRateLimiter(rateLimiter =>
     {
@@ -100,6 +112,7 @@ app.UseStaticFiles();
 
 if (authOptions.Enabled)
 {
+    app.UseForwardedHeaders(); // must run before auth so the scheme is correct
     app.UseRateLimiter();
     app.UseAuthentication();
     app.UseAuthorization();
