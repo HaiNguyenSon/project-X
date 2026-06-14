@@ -33,6 +33,12 @@ public sealed class RagOptions
     /// <summary>Prefix added to the user's query before embedding (see above).</summary>
     public string EmbeddingQueryPrefix { get; set; } = "search_query: ";
 
+    /// <summary>
+    /// How many chunks to embed per Ollama request. Avoids sending one huge request
+    /// for a large document (slow, memory-heavy, timeout-prone).
+    /// </summary>
+    public int EmbeddingBatchSize { get; set; } = 16;
+
     /// <summary>Approximate target chunk size in tokens (estimated from characters).</summary>
     public int ChunkSizeTokens { get; set; } = 750;
 

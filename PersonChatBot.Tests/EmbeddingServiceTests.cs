@@ -40,14 +40,31 @@ public class EmbeddingServiceTests
         Assert.Empty(capture.Seen);
     }
 
+    [Fact]
+    public async Task Documents_are_embedded_in_batches_and_results_keep_order()
+    {
+        var capture = new CapturingGenerator(4);
+        var service = new EmbeddingService(capture,
+            TestSupport.Options(new RagOptions { EmbeddingBatchSize = 2, EmbeddingDocumentPrefix = "" }));
+
+        var texts = new[] { "a", "b", "c", "d", "e" };
+        var vectors = await service.EmbedDocumentsAsync(texts);
+
+        Assert.Equal(5, vectors.Count);                 // one vector per input
+        Assert.Equal(3, capture.BatchCalls);            // 2 + 2 + 1
+        Assert.Equal(texts, capture.Seen);              // order preserved across batches
+    }
+
     private sealed class CapturingGenerator(int dim) : IEmbeddingGenerator<string, Embedding<float>>
     {
         public List<string> Seen { get; } = [];
+        public int BatchCalls { get; private set; }
 
         public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
             IEnumerable<string> values, EmbeddingGenerationOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            BatchCalls++;
             var list = values.ToList();
             Seen.AddRange(list);
             return Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
