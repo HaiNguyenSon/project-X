@@ -62,4 +62,11 @@ public sealed class RagOptions
     /// (re)indexed. File systems fire several events per save; this debounces them.
     /// </summary>
     public int WatchDebounceMs { get; set; } = 750;
+
+    /// <summary>
+    /// How many times to retry indexing a file that fails transiently (e.g. it is
+    /// still being copied and is locked) before giving up. Each retry waits one
+    /// debounce period, so this also bounds total retry time.
+    /// </summary>
+    public int WatchMaxRetries { get; set; } = 10;
 }

@@ -19,6 +19,7 @@ public sealed class FolderWatcherService : BackgroundService
     private readonly ILogger<FolderWatcherService> _logger;
 
     private readonly ConcurrentDictionary<string, DateTimeOffset> _pending = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _attempts = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _fullRescanRequested;
 
     public FolderWatcherService(
@@ -110,11 +111,27 @@ public sealed class FolderWatcherService : BackgroundService
                     {
                         await _indexing.RemoveFileAsync(path, stoppingToken);
                     }
+                    _attempts.TryRemove(path, out _); // succeeded — reset retry count
                 }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to process change for {Path}.", path);
+                    // A file that is still being copied is locked; retry a few times
+                    // (re-enqueueing waits another debounce period) before giving up.
+                    var attempt = _attempts.AddOrUpdate(path, 1, (_, c) => c + 1);
+                    if (attempt < _options.WatchMaxRetries)
+                    {
+                        _logger.LogWarning(ex,
+                            "Failed to process {Path} (attempt {Attempt}/{Max}); will retry.",
+                            path, attempt, _options.WatchMaxRetries);
+                        Enqueue(path);
+                    }
+                    else
+                    {
+                        _logger.LogError(ex,
+                            "Giving up on {Path} after {Max} attempts.", path, _options.WatchMaxRetries);
+                        _attempts.TryRemove(path, out _);
+                    }
                 }
             }
         }
