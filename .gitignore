@@ -49,3 +49,9 @@ Thumbs.db
 # Environment / secrets
 *.env
 appsettings.*.local.json
+
+# RAG runtime data (local only — never commit indexed content or the documents)
+*.db
+*.db-shm
+*.db-wal
+/PersonChatBot/Documents/
