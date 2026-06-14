@@ -29,7 +29,7 @@ public class IndexingServiceTests
             new PlainTextExtractor(), new DocxTextExtractor(), new PdfTextExtractor(),
         });
         var chunker = new Chunker(options);
-        var embeddings = new EmbeddingService(new FakeEmbeddingGenerator(Dim));
+        var embeddings = TestSupport.Embedder(Dim);
         var store = new SqliteVecStore(options, NullLogger<SqliteVecStore>.Instance);
         var indexing = new IndexingService(
             options, extraction, chunker, embeddings, store, NullLogger<IndexingService>.Instance);

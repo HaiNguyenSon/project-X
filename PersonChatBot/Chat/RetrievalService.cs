@@ -25,7 +25,7 @@ public sealed class RetrievalService
         if (string.IsNullOrWhiteSpace(query))
             return [];
 
-        var queryVector = await _embeddings.EmbedAsync(query, ct);
+        var queryVector = await _embeddings.EmbedQueryAsync(query, ct);
         var hits = await _store.SearchAsync(queryVector, _options.TopK, ct);
 
         return _options.MinRelevanceScore > 0

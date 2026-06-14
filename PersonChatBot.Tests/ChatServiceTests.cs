@@ -16,7 +16,7 @@ public class ChatServiceTests
     {
         var options = TestSupport.Options(new RagOptions { EmbeddingDimensions = 4 });
         var store = new SqliteVecStore(options, NullLogger<SqliteVecStore>.Instance); // never used here
-        var retrieval = new RetrievalService(new EmbeddingService(new FakeEmbeddingGenerator(4)), store, options);
+        var retrieval = new RetrievalService(TestSupport.Embedder(4), store, options);
         return new ChatService(chat, retrieval, options, NullLogger<ChatService>.Instance);
     }
 

@@ -23,6 +23,16 @@ public sealed class RagOptions
     /// <summary>Dimension of the embedding vectors (nomic-embed-text = 768).</summary>
     public int EmbeddingDimensions { get; set; } = 768;
 
+    /// <summary>
+    /// Prefix added to document chunks before embedding. nomic-embed-text is trained
+    /// with task prefixes and retrieves noticeably better with them. Set to "" for
+    /// embedding models that don't use prefixes.
+    /// </summary>
+    public string EmbeddingDocumentPrefix { get; set; } = "search_document: ";
+
+    /// <summary>Prefix added to the user's query before embedding (see above).</summary>
+    public string EmbeddingQueryPrefix { get; set; } = "search_query: ";
+
     /// <summary>Approximate target chunk size in tokens (estimated from characters).</summary>
     public int ChunkSizeTokens { get; set; } = 750;
 

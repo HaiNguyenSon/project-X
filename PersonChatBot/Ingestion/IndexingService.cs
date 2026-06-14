@@ -65,7 +65,7 @@ public sealed class IndexingService
             return false;
         }
 
-        var vectors = await _embeddings.EmbedBatchAsync(chunks.Select(c => c.Text).ToList(), ct);
+        var vectors = await _embeddings.EmbedDocumentsAsync(chunks.Select(c => c.Text).ToList(), ct);
         if (vectors.Count != chunks.Count)
             throw new InvalidOperationException(
                 $"Embedding count ({vectors.Count}) does not match chunk count ({chunks.Count}).");

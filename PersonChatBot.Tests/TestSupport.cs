@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PersonChatBot.Configuration;
+using PersonChatBot.Embeddings;
 using PersonChatBot.Storage;
 
 namespace PersonChatBot.Tests;
@@ -54,4 +55,8 @@ internal static class TestSupport
     }
 
     public static ReadOnlyMemory<float> Vec(params float[] values) => values;
+
+    /// <summary>An EmbeddingService backed by the deterministic fake generator.</summary>
+    public static EmbeddingService Embedder(int dimensions) =>
+        new(new FakeEmbeddingGenerator(dimensions), Options(new RagOptions { EmbeddingDimensions = dimensions }));
 }
