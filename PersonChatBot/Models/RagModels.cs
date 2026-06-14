@@ -28,10 +28,24 @@ public enum ChatAuthor { User, Assistant }
 /// <summary>One prior turn of conversation, passed back in for follow-up context.</summary>
 public sealed record ChatTurn(ChatAuthor Author, string Content);
 
+/// <summary>What happened when a single file was processed.</summary>
+public enum IndexOutcome
+{
+    /// <summary>File was (re)indexed.</summary>
+    Indexed,
+    /// <summary>File content hash was unchanged; nothing to do.</summary>
+    Unchanged,
+    /// <summary>No extractable text (e.g. a scanned/image-only PDF); not indexed.</summary>
+    NoExtractableText,
+    /// <summary>File type isn't supported, or the file no longer exists.</summary>
+    Unsupported,
+}
+
 /// <summary>Result of a (re)index pass over the documents folder.</summary>
 public sealed record IndexReport(
     int FilesIndexed,
     int FilesSkipped,
     int FilesRemoved,
     int ChunksWritten,
+    IReadOnlyList<string> NoTextFiles,
     IReadOnlyList<string> Errors);

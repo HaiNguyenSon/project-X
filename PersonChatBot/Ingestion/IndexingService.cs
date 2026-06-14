@@ -39,30 +39,30 @@ public sealed class IndexingService
     public string DocumentsFolder => Path.GetFullPath(_options.DocumentsFolder);
 
     /// <summary>
-    /// Index a single file. Returns true if it was (re)indexed, false if skipped
-    /// (unchanged, unsupported, or empty).
+    /// Index a single file. The returned <see cref="IndexOutcome"/> says what happened
+    /// (indexed, unchanged, no extractable text, or unsupported).
     /// </summary>
-    public async Task<bool> IndexFileAsync(string filePath, CancellationToken ct = default)
+    public async Task<IndexOutcome> IndexFileAsync(string filePath, CancellationToken ct = default)
     {
         if (!_extraction.IsSupported(filePath) || !File.Exists(filePath))
-            return false;
+            return IndexOutcome.Unsupported;
 
         var hash = await ComputeFileHashAsync(filePath, ct);
         var existing = await _store.GetFileHashAsync(filePath, ct);
         if (existing == hash)
         {
             _logger.LogDebug("Skipping unchanged file {File}.", filePath);
-            return false;
+            return IndexOutcome.Unchanged;
         }
 
         var pages = await _extraction.ExtractAsync(filePath, ct);
         var chunks = _chunker.Chunk(pages);
         if (chunks.Count == 0)
         {
-            // Nothing extractable — make sure any stale chunks are cleared.
+            // Nothing extractable (e.g. a scanned/image-only PDF) — clear any stale chunks.
             await _store.DeleteFileAsync(filePath, ct);
-            _logger.LogInformation("No extractable text in {File}; cleared from index.", filePath);
-            return false;
+            _logger.LogWarning("No extractable text in {File} (scanned/image PDF?); not indexed.", filePath);
+            return IndexOutcome.NoExtractableText;
         }
 
         var vectors = await _embeddings.EmbedDocumentsAsync(chunks.Select(c => c.Text).ToList(), ct);
@@ -76,7 +76,7 @@ public sealed class IndexingService
 
         await _store.UpsertFileAsync(filePath, Path.GetFileName(filePath), hash, records, ct);
         _logger.LogInformation("Indexed {File}: {Chunks} chunks.", filePath, records.Count);
-        return true;
+        return IndexOutcome.Indexed;
     }
 
     public Task RemoveFileAsync(string filePath, CancellationToken ct = default)
@@ -98,7 +98,8 @@ public sealed class IndexingService
             .Where(_extraction.IsSupported)
             .ToList();
 
-        int indexed = 0, skipped = 0, removed = 0, chunksWritten = 0;
+        int indexed = 0, skipped = 0, removed = 0;
+        var noText = new List<string>();
         var errors = new List<string>();
 
         foreach (var file in onDisk)
@@ -106,15 +107,11 @@ public sealed class IndexingService
             ct.ThrowIfCancellationRequested();
             try
             {
-                var statsBefore = await _store.GetFileHashAsync(file, ct);
-                if (await IndexFileAsync(file, ct))
+                switch (await IndexFileAsync(file, ct))
                 {
-                    indexed++;
-                    // chunk count is tracked in the store; recomputing here is cheap enough to skip.
-                }
-                else if (statsBefore is not null)
-                {
-                    skipped++;
+                    case IndexOutcome.Indexed: indexed++; break;
+                    case IndexOutcome.Unchanged: skipped++; break;
+                    case IndexOutcome.NoExtractableText: noText.Add(Path.GetFileName(file)); break;
                 }
             }
             catch (Exception ex)
@@ -137,12 +134,11 @@ public sealed class IndexingService
         }
 
         var stats = await _store.GetStatsAsync(ct);
-        chunksWritten = stats.ChunkCount;
 
         _logger.LogInformation(
-            "Reindex complete: {Indexed} indexed, {Skipped} skipped, {Removed} removed.",
-            indexed, skipped, removed);
-        return new IndexReport(indexed, skipped, removed, chunksWritten, errors);
+            "Reindex complete: {Indexed} indexed, {Skipped} skipped, {Removed} removed, {NoText} with no text.",
+            indexed, skipped, removed, noText.Count);
+        return new IndexReport(indexed, skipped, removed, stats.ChunkCount, noText, errors);
     }
 
     private static async Task<string> ComputeFileHashAsync(string filePath, CancellationToken ct)

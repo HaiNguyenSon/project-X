@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using PersonChatBot.Configuration;
 using PersonChatBot.Embeddings;
 using PersonChatBot.Ingestion;
+using PersonChatBot.Models;
 using PersonChatBot.Storage;
 
 namespace PersonChatBot.Tests;
@@ -53,9 +54,9 @@ public class IndexingServiceTests
         var path = Path.Combine(folder, "note.txt");
         await File.WriteAllTextAsync(path, "The sky is blue and the grass is green.");
 
-        var indexed = await indexing.IndexFileAsync(path);
+        var outcome = await indexing.IndexFileAsync(path);
 
-        Assert.True(indexed);
+        Assert.Equal(IndexOutcome.Indexed, outcome);
         var stats = await store.GetStatsAsync();
         Assert.Equal(1, stats.FileCount);
         Assert.True(stats.ChunkCount >= 1);
@@ -67,8 +68,8 @@ public class IndexingServiceTests
         var path = Path.Combine(folder, "note.txt");
         await File.WriteAllTextAsync(path, "Stable content.");
 
-        Assert.True(await indexing.IndexFileAsync(path));   // first time: indexed
-        Assert.False(await indexing.IndexFileAsync(path));  // unchanged: skipped (hash match)
+        Assert.Equal(IndexOutcome.Indexed, await indexing.IndexFileAsync(path));    // first time
+        Assert.Equal(IndexOutcome.Unchanged, await indexing.IndexFileAsync(path));  // hash match
     });
 
     [Fact]
@@ -76,10 +77,10 @@ public class IndexingServiceTests
     {
         var path = Path.Combine(folder, "note.txt");
         await File.WriteAllTextAsync(path, "Version one.");
-        Assert.True(await indexing.IndexFileAsync(path));
+        Assert.Equal(IndexOutcome.Indexed, await indexing.IndexFileAsync(path));
 
         await File.WriteAllTextAsync(path, "Version two, now different.");
-        Assert.True(await indexing.IndexFileAsync(path));   // hash changed -> reindexed
+        Assert.Equal(IndexOutcome.Indexed, await indexing.IndexFileAsync(path));   // hash changed -> reindexed
 
         Assert.Equal(1, (await store.GetStatsAsync()).FileCount); // still one file, not duplicated
     });
@@ -90,8 +91,30 @@ public class IndexingServiceTests
         var path = Path.Combine(folder, "image.png");
         await File.WriteAllBytesAsync(path, new byte[] { 1, 2, 3 });
 
-        Assert.False(await indexing.IndexFileAsync(path));
+        Assert.Equal(IndexOutcome.Unsupported, await indexing.IndexFileAsync(path));
         Assert.Equal(0, (await store.GetStatsAsync()).FileCount);
+    });
+
+    [Fact]
+    public Task File_with_no_extractable_text_reports_NoExtractableText() => WithIndexing(async (folder, indexing, store) =>
+    {
+        var path = Path.Combine(folder, "blank.txt");
+        await File.WriteAllTextAsync(path, "   \r\n\t  "); // whitespace only -> no chunks
+
+        Assert.Equal(IndexOutcome.NoExtractableText, await indexing.IndexFileAsync(path));
+        Assert.Equal(0, (await store.GetStatsAsync()).FileCount);
+    });
+
+    [Fact]
+    public Task ReindexAll_reports_files_with_no_extractable_text() => WithIndexing(async (folder, indexing, store) =>
+    {
+        await File.WriteAllTextAsync(Path.Combine(folder, "good.txt"), "real content here");
+        await File.WriteAllTextAsync(Path.Combine(folder, "blank.md"), "   ");
+
+        var report = await indexing.ReindexAllAsync();
+
+        Assert.Equal(1, report.FilesIndexed);
+        Assert.Equal("blank.md", Assert.Single(report.NoTextFiles));
     });
 
     [Fact]

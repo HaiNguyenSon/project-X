@@ -82,6 +82,12 @@
             <p class="chat-reindex-report">
                 +@_reindexReport.FilesIndexed indexed, @_reindexReport.FilesSkipped unchanged,
                 @_reindexReport.FilesRemoved removed.
+                @if (_reindexReport.NoTextFiles.Count > 0)
+                {
+                    <span class="chat-errors" title="@string.Join(", ", _reindexReport.NoTextFiles)">
+                        @_reindexReport.NoTextFiles.Count file(s) had no extractable text (scanned PDF?)
+                    </span>
+                }
                 @if (_reindexReport.Errors.Count > 0)
                 {
                     <span class="chat-errors">@_reindexReport.Errors.Count error(s)</span>
@@ -198,7 +204,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Reindex failed.");
-            _reindexReport = new IndexReport(0, 0, 0, 0, new[] { ex.Message });
+            _reindexReport = new IndexReport(0, 0, 0, 0, [], new[] { ex.Message });
         }
         finally
         {
