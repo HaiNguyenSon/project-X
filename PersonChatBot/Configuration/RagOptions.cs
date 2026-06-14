@@ -50,9 +50,11 @@ public sealed class RagOptions
 
     /// <summary>
     /// Minimum cosine similarity (0..1) a chunk must reach to be used as context.
-    /// 0 keeps everything and lets the grounding prompt decide; raise it to filter noise.
+    /// Filters out weak matches so the model isn't grounded on barely-related text.
+    /// Tune per corpus: lower it if good answers are being missed, raise it if the
+    /// model cites irrelevant sources. 0 disables filtering.
     /// </summary>
-    public double MinRelevanceScore { get; set; } = 0.0;
+    public double MinRelevanceScore { get; set; } = 0.35;
 
     /// <summary>Sampling temperature for the chat model. Low keeps answers grounded.</summary>
     public float Temperature { get; set; } = 0.2f;
