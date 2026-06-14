@@ -82,7 +82,14 @@ public sealed class ChatService
         var chatHistory = new ChatHistory();
         chatHistory.AddSystemMessage(SystemPrompt);
 
-        foreach (var turn in history)
+        // Only keep the most recent turns: the prompt also carries the system
+        // message and the retrieved context, and the local model has a limited
+        // context window. Older turns are dropped to avoid overflowing it.
+        var recent = _options.MaxHistoryTurns > 0 && history.Count > _options.MaxHistoryTurns
+            ? history.Skip(history.Count - _options.MaxHistoryTurns)
+            : history;
+
+        foreach (var turn in recent)
         {
             if (turn.Author == ChatAuthor.User)
                 chatHistory.AddUserMessage(turn.Content);

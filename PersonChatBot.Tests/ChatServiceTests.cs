@@ -12,9 +12,9 @@ namespace PersonChatBot.Tests;
 
 public class ChatServiceTests
 {
-    private static ChatService MakeChatService(IChatCompletionService chat)
+    private static ChatService MakeChatService(IChatCompletionService chat, RagOptions? ragOptions = null)
     {
-        var options = TestSupport.Options(new RagOptions { EmbeddingDimensions = 4 });
+        var options = TestSupport.Options(ragOptions ?? new RagOptions { EmbeddingDimensions = 4 });
         var store = new SqliteVecStore(options, NullLogger<SqliteVecStore>.Instance); // never used here
         var retrieval = new RetrievalService(TestSupport.Embedder(4), store, options);
         return new ChatService(chat, retrieval, options, NullLogger<ChatService>.Instance);
@@ -48,6 +48,29 @@ public class ChatServiceTests
         Assert.Equal("Paris is the capital.", answer);
     }
 
+    [Fact]
+    public async Task History_is_trimmed_to_the_configured_number_of_turns()
+    {
+        var scripted = new ScriptedChatService("ok");
+        var chat = MakeChatService(scripted, new RagOptions { EmbeddingDimensions = 4, MaxHistoryTurns = 2 });
+
+        var history = new List<ChatTurn>
+        {
+            new(ChatAuthor.User, "q1"), new(ChatAuthor.Assistant, "a1"),
+            new(ChatAuthor.User, "q2"), new(ChatAuthor.Assistant, "a2"),
+            new(ChatAuthor.User, "q3"), new(ChatAuthor.Assistant, "a3"),
+        };
+
+        await foreach (var _ in chat.StreamAnswerAsync("now", history, [Hit("some context")])) { }
+
+        var sent = scripted.LastHistory!;
+        // system prompt + last 2 history turns + current grounded question = 4 messages.
+        Assert.Equal(4, sent.Count);
+        // The kept turns are the most recent ones; "q1"/"a1"/"q2"/"a2" are dropped.
+        Assert.Contains(sent, m => m.Content == "a3");
+        Assert.DoesNotContain(sent, m => m.Content == "q1");
+    }
+
     // --- fakes ---
 
     private sealed class ThrowingChatService : IChatCompletionService
@@ -76,6 +99,8 @@ public class ChatServiceTests
         private readonly string[] _tokens;
         public ScriptedChatService(params string[] tokens) => _tokens = tokens;
 
+        public ChatHistory? LastHistory { get; private set; }
+
         public IReadOnlyDictionary<string, object?> Attributes => new Dictionary<string, object?>();
 
         public Task<IReadOnlyList<ChatMessageContent>> GetChatMessageContentsAsync(
@@ -88,6 +113,7 @@ public class ChatServiceTests
             ChatHistory chatHistory, PromptExecutionSettings? executionSettings = null,
             Kernel? kernel = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            LastHistory = chatHistory;
             foreach (var token in _tokens)
             {
                 await Task.Yield();

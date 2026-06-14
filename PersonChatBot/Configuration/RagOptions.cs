@@ -51,6 +51,13 @@ public sealed class RagOptions
     /// <summary>Sampling temperature for the chat model. Low keeps answers grounded.</summary>
     public float Temperature { get; set; } = 0.2f;
 
+    /// <summary>
+    /// Maximum number of prior conversation turns sent back to the model. Keeps the
+    /// system prompt + retrieved context + history within the model's context window.
+    /// 0 means no limit.
+    /// </summary>
+    public int MaxHistoryTurns { get; set; } = 6;
+
     /// <summary>Path to the single-file SQLite vector database.</summary>
     public string DatabasePath { get; set; } = "rag.db";
 
