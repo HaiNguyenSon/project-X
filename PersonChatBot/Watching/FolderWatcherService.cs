@@ -114,15 +114,22 @@ public sealed class FolderWatcherService : BackgroundService
                     _attempts.TryRemove(path, out _); // succeeded — reset retry count
                 }
                 catch (OperationCanceledException) { return; }
+                catch (Exception ex) when (!IsTransient(ex))
+                {
+                    // A corrupt/unsupported-content file (bad PDF, broken .docx) fails the
+                    // same way every time — don't retry it, just log once and move on.
+                    _logger.LogError(ex, "Failed to process {Path}; not a transient error, not retrying.", path);
+                    _attempts.TryRemove(path, out _);
+                }
                 catch (Exception ex)
                 {
-                    // A file that is still being copied is locked; retry a few times
-                    // (re-enqueueing waits another debounce period) before giving up.
+                    // Transient error (e.g. the file is still being copied and is locked).
+                    // Retry a few times — re-enqueueing waits another debounce period.
                     var attempt = _attempts.AddOrUpdate(path, 1, (_, c) => c + 1);
                     if (attempt < _options.WatchMaxRetries)
                     {
                         _logger.LogWarning(ex,
-                            "Failed to process {Path} (attempt {Attempt}/{Max}); will retry.",
+                            "Transient error processing {Path} (attempt {Attempt}/{Max}); will retry.",
                             path, attempt, _options.WatchMaxRetries);
                         Enqueue(path);
                     }
@@ -136,6 +143,14 @@ public sealed class FolderWatcherService : BackgroundService
             }
         }
     }
+
+    /// <summary>
+    /// Whether an error processing a file is worth retrying. File-locking / access
+    /// errors (the file is still being written) are transient; parsing/format errors
+    /// from a corrupt document are not — retrying those just repeats the failure.
+    /// </summary>
+    internal static bool IsTransient(Exception ex) =>
+        ex is IOException or UnauthorizedAccessException;
 
     private void OnChanged(object sender, FileSystemEventArgs e) => Enqueue(e.FullPath);
 
