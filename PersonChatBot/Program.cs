@@ -59,6 +59,11 @@ builder.Services.AddSingleton<ChatService>();
 // --- RAG: folder watching (startup index + live re-index) ---
 builder.Services.AddHostedService<FolderWatcherService>();
 
+// Defense in depth: a crash in a background service must never take down the web
+// app. The watcher already guards its own work; this is the backstop.
+builder.Services.Configure<HostOptions>(host =>
+    host.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
+
 // --- Auth (single password). Disabled when no password is configured. ---
 builder.Services.Configure<AuthOptions>(
     builder.Configuration.GetSection(AuthOptions.SectionName));
