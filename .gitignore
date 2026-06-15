@@ -55,3 +55,6 @@ appsettings.*.local.json
 *.db-shm
 *.db-wal
 /PersonChatBot/Documents/
+
+# Track CLAUDE.md even though a global excludesfile ignores it
+!CLAUDE.md
