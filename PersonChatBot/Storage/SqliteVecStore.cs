@@ -65,6 +65,26 @@ public sealed class SqliteVecStore : IVectorStore, IAsyncDisposable
                 );
                 """, ct);
 
+            // Small key/value table for index-level state. 'last_indexed_at' holds the time of
+            // the last *successful* index — set deliberately (not as a per-file side effect), so
+            // a failed/aborted reindex never advances it.
+            await ExecAsync(
+                """
+                CREATE TABLE IF NOT EXISTS meta (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                """, ct);
+
+            // One-time backfill for databases created before the meta table existed: seed
+            // last_indexed_at from the newest file so they don't read "never" after upgrade.
+            await ExecAsync(
+                """
+                INSERT OR IGNORE INTO meta (key, value)
+                SELECT 'last_indexed_at', MAX(indexed_at) FROM files
+                HAVING MAX(indexed_at) IS NOT NULL;
+                """, ct);
+
             _initialized = true;
             _logger.LogInformation("Vector store initialized at {Path} (dim={Dim}).", dbPath, dim);
         }
@@ -186,8 +206,14 @@ public sealed class SqliteVecStore : IVectorStore, IAsyncDisposable
         try
         {
             using var cmd = _connection!.CreateCommand();
+            // Last-indexed time comes from meta (set only on a successful index), not from
+            // MAX(indexed_at) — so a partially-failed reindex can't drag it forward.
             cmd.CommandText =
-                "SELECT COUNT(*), COALESCE(SUM(chunk_count), 0), MAX(indexed_at) FROM files;";
+                """
+                SELECT COUNT(*), COALESCE(SUM(chunk_count), 0),
+                       (SELECT value FROM meta WHERE key = 'last_indexed_at')
+                FROM files;
+                """;
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             if (!await reader.ReadAsync(ct))
                 return new IndexStats(0, 0, null);
@@ -198,6 +224,24 @@ public sealed class SqliteVecStore : IVectorStore, IAsyncDisposable
                 ? null
                 : DateTimeOffset.Parse(reader.GetString(2));
             return new IndexStats(fileCount, chunkCount, lastAt);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task SetLastIndexedAtAsync(DateTimeOffset value, CancellationToken ct = default)
+    {
+        await EnsureReadyAsync(ct);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            using var cmd = _connection!.CreateCommand();
+            cmd.CommandText =
+                """
+                INSERT INTO meta (key, value) VALUES ('last_indexed_at', @at)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                """;
+            cmd.Parameters.AddWithValue("@at", value.ToString("O"));
+            await cmd.ExecuteNonQueryAsync(ct);
         }
         finally { _gate.Release(); }
     }

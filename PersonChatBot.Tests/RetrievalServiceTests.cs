@@ -54,5 +54,6 @@ public class RetrievalServiceTests
         public Task DeleteFileAsync(string filePath, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> GetIndexedFilePathsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<IndexStats> GetStatsAsync(CancellationToken ct = default) => Task.FromResult(new IndexStats(0, 0, null));
+        public Task SetLastIndexedAtAsync(DateTimeOffset value, CancellationToken ct = default) => Task.CompletedTask;
     }
 }

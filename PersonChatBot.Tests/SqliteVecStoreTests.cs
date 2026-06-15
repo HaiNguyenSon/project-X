@@ -85,11 +85,27 @@ public class SqliteVecStoreTests
         var stats = await store.GetStatsAsync();
         Assert.Equal(2, stats.FileCount);
         Assert.Equal(3, stats.ChunkCount);
-        Assert.NotNull(stats.LastIndexedAt);
+        // Upserting files does not stamp "last indexed" — that is recorded deliberately
+        // (only after a successful index), so a failed pass can't advance it.
+        Assert.Null(stats.LastIndexedAt);
 
         var paths = await store.GetIndexedFilePathsAsync();
         Assert.Equal(2, paths.Count);
         Assert.Contains(@"C:\a.pdf", paths);
+    });
+
+    [Fact]
+    public Task SetLastIndexedAt_is_recorded_and_overwritten() => WithStore(async store =>
+    {
+        Assert.Null((await store.GetStatsAsync()).LastIndexedAt);
+
+        var first = new DateTimeOffset(2026, 6, 15, 9, 0, 0, TimeSpan.Zero);
+        await store.SetLastIndexedAtAsync(first);
+        Assert.Equal(first, (await store.GetStatsAsync()).LastIndexedAt);
+
+        var second = new DateTimeOffset(2026, 6, 15, 10, 30, 0, TimeSpan.Zero);
+        await store.SetLastIndexedAtAsync(second);                  // upsert, not a duplicate row
+        Assert.Equal(second, (await store.GetStatsAsync()).LastIndexedAt);
     });
 
     [Fact]

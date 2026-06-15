@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging.Abstractions;
 using PersonChatBot.Configuration;
 using PersonChatBot.Embeddings;
@@ -164,6 +165,85 @@ public class IndexingServiceTests
         Assert.Equal(2, report.FilesIndexed);
         Assert.Equal(2, (await store.GetStatsAsync()).FileCount);
     });
+
+    [Fact]
+    public Task ReindexAll_stamps_last_indexed_on_success_but_not_when_nothing_changes() =>
+        WithIndexing(async (folder, indexing, store) =>
+    {
+        await File.WriteAllTextAsync(Path.Combine(folder, "a.txt"), "alpha content");
+
+        Assert.Null((await store.GetStatsAsync()).LastIndexedAt);    // nothing indexed yet
+
+        await indexing.ReindexAllAsync();
+        var first = (await store.GetStatsAsync()).LastIndexedAt;
+        Assert.NotNull(first);                                       // a file was indexed -> stamped
+
+        await indexing.ReindexAllAsync();                            // all unchanged this time
+        Assert.Equal(first, (await store.GetStatsAsync()).LastIndexedAt); // not advanced
+    });
+
+    [Fact]
+    public Task IndexWatchedFile_stamps_last_indexed_only_on_a_fresh_index() =>
+        WithIndexing(async (folder, indexing, store) =>
+    {
+        var path = Path.Combine(folder, "note.txt");
+        await File.WriteAllTextAsync(path, "watched content");
+
+        Assert.Equal(IndexOutcome.Indexed, await indexing.IndexWatchedFileAsync(path));
+        var stamped = (await store.GetStatsAsync()).LastIndexedAt;
+        Assert.NotNull(stamped);
+
+        Assert.Equal(IndexOutcome.Unchanged, await indexing.IndexWatchedFileAsync(path));
+        Assert.Equal(stamped, (await store.GetStatsAsync()).LastIndexedAt); // unchanged -> not advanced
+    });
+
+    [Fact]
+    public async Task A_failed_reindex_does_not_advance_last_indexed()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"pcbdocs_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        var dbPath = Path.Combine(Path.GetTempPath(), $"pcbidx_{Guid.NewGuid():N}.db");
+        var options = TestSupport.Options(new RagOptions
+        {
+            DocumentsFolder = folder, DatabasePath = dbPath, EmbeddingDimensions = Dim,
+        });
+
+        var extraction = new TextExtractionService(new ITextExtractor[] { new PlainTextExtractor() });
+        var chunker = new Chunker(options);
+        // Embedder that always reports the model is unreachable -> reindex aborts.
+        var embeddings = new EmbeddingService(
+            new UnreachableGenerator(), options);
+        var store = new SqliteVecStore(options, NullLogger<SqliteVecStore>.Instance);
+        var indexing = new IndexingService(
+            options, extraction, chunker, embeddings, store, NullLogger<IndexingService>.Instance);
+
+        try
+        {
+            await store.InitializeAsync();
+            await File.WriteAllTextAsync(Path.Combine(folder, "a.txt"), "content to embed");
+
+            await Assert.ThrowsAsync<EmbeddingServiceUnavailableException>(() => indexing.ReindexAllAsync());
+
+            Assert.Null((await store.GetStatsAsync()).LastIndexedAt); // failed pass left it untouched
+        }
+        finally
+        {
+            await store.DisposeAsync();
+            try { File.Delete(dbPath); } catch { }
+            try { Directory.Delete(folder, recursive: true); } catch { }
+        }
+    }
+
+    private sealed class UnreachableGenerator : IEmbeddingGenerator<string, Embedding<float>>
+    {
+        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+            IEnumerable<string> values, EmbeddingGenerationOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new HttpRequestException("connection refused");
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
 
     [Fact]
     public Task ReindexAll_prunes_files_deleted_from_disk() => WithIndexing(async (folder, indexing, store) =>

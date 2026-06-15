@@ -129,7 +129,7 @@ public sealed class FolderWatcherService : BackgroundService
                     if (File.Exists(path))
                     {
                         if (_extraction.IsSupported(path))
-                            await _indexing.IndexFileAsync(path, stoppingToken);
+                            await _indexing.IndexWatchedFileAsync(path, stoppingToken);
                     }
                     else
                     {

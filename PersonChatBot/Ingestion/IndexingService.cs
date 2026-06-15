@@ -167,6 +167,11 @@ public sealed class IndexingService
             }
         }
 
+        // Only stamp "last indexed" when the pass actually indexed something and hit no errors.
+        // An aborted pass throws before here; an all-unchanged pass leaves the stamp as-is.
+        if (errors.Count == 0 && indexed > 0)
+            await _store.SetLastIndexedAtAsync(DateTimeOffset.UtcNow, ct);
+
         var stats = await _store.GetStatsAsync(ct);
 
         _logger.LogInformation(
@@ -174,6 +179,19 @@ public sealed class IndexingService
             "{NoText} with no text, {Oversized} too large, {OverLimit} over the file limit.",
             indexed, skipped, removed, noText.Count, oversized.Count, overLimit);
         return new IndexReport(indexed, skipped, removed, stats.ChunkCount, noText, oversized, overLimit, errors);
+    }
+
+    /// <summary>
+    /// Index a single file (used by the live folder watcher) and, if it was actually indexed,
+    /// record the successful-index time. Unlike a reindex pass, one settled file is a complete
+    /// unit of work, so its success stands on its own.
+    /// </summary>
+    public async Task<IndexOutcome> IndexWatchedFileAsync(string filePath, CancellationToken ct = default)
+    {
+        var outcome = await IndexFileAsync(filePath, ct);
+        if (outcome == IndexOutcome.Indexed)
+            await _store.SetLastIndexedAtAsync(DateTimeOffset.UtcNow, ct);
+        return outcome;
     }
 
     private static async Task<string> ComputeFileHashAsync(string filePath, CancellationToken ct)

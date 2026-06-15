@@ -32,6 +32,12 @@ public interface IVectorStore
     /// <summary>Counts and last-index time for the status panel.</summary>
     Task<IndexStats> GetStatsAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Record the time of a successful index. Called deliberately (after a clean reindex
+    /// pass or a successful single-file index), so a failed run never advances it.
+    /// </summary>
+    Task SetLastIndexedAtAsync(DateTimeOffset value, CancellationToken ct = default);
+
     /// <summary>Top-K nearest chunks to the query vector (cosine distance).</summary>
     Task<IReadOnlyList<SearchHit>> SearchAsync(
         ReadOnlyMemory<float> queryVector, int topK, CancellationToken ct = default);
