@@ -6,9 +6,14 @@ phone and the app, carried over your private Tailscale network.
 
 ## 1. Set a password
 
-Auth is **off** when no password is configured (convenient for local dev).
-Before exposing the app, set one. Don't commit it to `appsettings.json` — use an
-environment variable or user-secrets:
+The app **refuses to start without a password** unless you explicitly opt into
+running with no authentication (`Auth:AllowAnonymous=true`). Local development is
+pre-configured to allow anonymous (`appsettings.Development.json`), and logs a
+warning whenever it runs without auth. This is a fail-safe so the app is never
+accidentally exposed open.
+
+Set a password before exposing the app. Don't commit it to `appsettings.json` —
+use an environment variable or user-secrets:
 
 ```powershell
 # Environment variable (note the double underscore)
@@ -54,6 +59,17 @@ On the phone:
 
 MagicDNS gives you the friendly `<machine>.<tailnet>.ts.net` hostname
 automatically (enable it in the Tailscale admin console if it isn't already).
+
+## 4. Keep the app bound to localhost
+
+Forwarded headers (`X-Forwarded-Proto`/`For`) are only trusted from any source
+while the app is bound to loopback — the case behind `tailscale serve`. If you
+bind it to a public address, those headers are no longer trusted (they can be
+spoofed) and the app logs a warning. In short: leave the `Kestrel` binding on
+`localhost` and let Tailscale handle external access.
+
+The app also sends a Content-Security-Policy and anti-clickjacking headers on
+every response.
 
 ### Notes
 - `tailscale serve` (default) keeps the app private to your tailnet. Do **not**
