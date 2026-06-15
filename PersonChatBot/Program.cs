@@ -9,6 +9,7 @@ using PersonChatBot.Components;
 using PersonChatBot.Configuration;
 using PersonChatBot.Embeddings;
 using PersonChatBot.Ingestion;
+using PersonChatBot.Security;
 using PersonChatBot.Storage;
 using PersonChatBot.Watching;
 
@@ -122,6 +123,8 @@ if (!authOptions.Enabled)
         "the app over the network can use it. Set Auth:Password before exposing it.");
 
 // Configure the HTTP request pipeline.
+app.UseSecurityHeaders();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
