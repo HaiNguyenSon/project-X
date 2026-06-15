@@ -56,6 +56,16 @@ builder.Services.Configure<AuthOptions>(
 var authOptions = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>()
                   ?? new AuthOptions();
 
+// Fail safe: never run open by accident. Running without a password requires an
+// explicit Auth:AllowAnonymous=true (set in appsettings.Development.json for local dev).
+if (!authOptions.Enabled && !authOptions.AllowAnonymous)
+{
+    throw new InvalidOperationException(
+        "No authentication password is configured. Set 'Auth:Password' (preferably via the " +
+        "Auth__Password environment variable or user-secrets) before running, or set " +
+        "'Auth:AllowAnonymous=true' to explicitly run with NO authentication.");
+}
+
 if (authOptions.Enabled)
 {
     builder.Services
@@ -97,6 +107,11 @@ if (authOptions.Enabled)
 }
 
 var app = builder.Build();
+
+if (!authOptions.Enabled)
+    app.Logger.LogWarning(
+        "Running WITHOUT authentication (Auth:AllowAnonymous is set). Anyone who can reach " +
+        "the app over the network can use it. Set Auth:Password before exposing it.");
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
