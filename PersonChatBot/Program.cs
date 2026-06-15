@@ -13,6 +13,14 @@ using PersonChatBot.Security;
 using PersonChatBot.Storage;
 using PersonChatBot.Watching;
 
+// Utility: `dotnet run -- hash-password "your passphrase"` prints a PBKDF2 hash to
+// put in Auth:PasswordHash, so the password never has to be stored in plaintext.
+if (args is ["hash-password", var plain])
+{
+    Console.WriteLine(PasswordHasher.Hash(plain));
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -147,10 +155,10 @@ if (authOptions.Enabled)
     app.UseAuthentication();
     app.UseAuthorization();
 
-    if (authOptions.Password.Length < 12)
+    if (string.IsNullOrEmpty(authOptions.PasswordHash) && authOptions.Password.Length < 12)
         app.Logger.LogWarning(
-            "Auth password is shorter than 12 characters. Use a long passphrase before " +
-            "exposing the app, even over Tailscale.");
+            "Auth password is shorter than 12 characters. Use a long passphrase (or a " +
+            "hashed password via Auth:PasswordHash) before exposing the app.");
 }
 
 app.UseAntiforgery();

@@ -24,6 +24,15 @@ dotnet user-secrets init
 dotnet user-secrets set "Auth:Password" "a-long-random-passphrase"
 ```
 
+**Better: store a hash, not the plaintext.** Generate a PBKDF2 hash and put it in
+`Auth:PasswordHash` (it takes precedence over `Auth:Password`):
+
+```powershell
+dotnet run -- hash-password "a-long-random-passphrase"
+# -> PBKDF2-SHA256$100000$....$....
+$env:Auth__PasswordHash = "PBKDF2-SHA256$100000$....$...."
+```
+
 With a password set, every page redirects to `/login` until you sign in. The
 session cookie lasts 30 days (sliding) and "Sign out" is in the nav.
 

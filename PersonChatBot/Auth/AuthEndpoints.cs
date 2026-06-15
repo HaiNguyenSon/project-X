@@ -1,6 +1,4 @@
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.Extensions.Options;
@@ -26,14 +24,8 @@ public static class AuthEndpoints
         {
             var form = await ctx.Request.ReadFormAsync();
             var supplied = form["password"].ToString();
-            var expected = options.Value.Password;
 
-            var ok = !string.IsNullOrEmpty(expected) &&
-                     CryptographicOperations.FixedTimeEquals(
-                         Encoding.UTF8.GetBytes(supplied),
-                         Encoding.UTF8.GetBytes(expected));
-
-            if (!ok)
+            if (!options.Value.VerifyPassword(supplied))
                 return Results.Redirect("/login?error=1");
 
             var identity = new ClaimsIdentity(
