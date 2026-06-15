@@ -55,6 +55,7 @@ builder.Services.Configure<AuthOptions>(
     builder.Configuration.GetSection(AuthOptions.SectionName));
 var authOptions = builder.Configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>()
                   ?? new AuthOptions();
+var loopbackOnly = NetworkBinding.IsLoopbackOnly(builder.Configuration);
 
 // Fail safe: never run open by accident. Running without a password requires an
 // explicit Auth:AllowAnonymous=true (set in appsettings.Development.json for local dev).
@@ -81,13 +82,20 @@ if (authOptions.Enabled)
 
     // Behind `tailscale serve` the app is reached over HTTPS but receives plain
     // HTTP on localhost. Honor X-Forwarded-Proto so the request is seen as HTTPS,
-    // which makes the auth cookie Secure. Only the local Tailscale proxy reaches
-    // the app (it binds to localhost), so trusting the forwarded headers is safe.
+    // which makes the auth cookie Secure.
+    //
+    // Trusting forwarded headers from ANY source is only safe when the app is bound
+    // to loopback (the local proxy is the only possible client). If it is bound to a
+    // public address those headers can be spoofed, so we keep the default behaviour
+    // (only loopback proxies trusted) and warn.
     builder.Services.Configure<ForwardedHeadersOptions>(forwarded =>
     {
         forwarded.ForwardedHeaders = ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedFor;
-        forwarded.KnownNetworks.Clear();
-        forwarded.KnownProxies.Clear();
+        if (loopbackOnly)
+        {
+            forwarded.KnownNetworks.Clear();
+            forwarded.KnownProxies.Clear();
+        }
     });
 
     // Throttle login attempts per client IP to slow password guessing.
@@ -128,6 +136,10 @@ app.UseStaticFiles();
 if (authOptions.Enabled)
 {
     app.UseForwardedHeaders(); // must run before auth so the scheme is correct
+    if (!loopbackOnly)
+        app.Logger.LogWarning(
+            "App is bound to a non-loopback address; X-Forwarded-* headers are only trusted " +
+            "from known proxies. Keep the app bound to localhost behind `tailscale serve`.");
     app.UseRateLimiter();
     app.UseAuthentication();
     app.UseAuthorization();
