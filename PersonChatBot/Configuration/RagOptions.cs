@@ -73,6 +73,22 @@ public sealed class RagOptions
     public string[] SupportedExtensions { get; set; } = [".pdf", ".docx", ".txt", ".md"];
 
     /// <summary>
+    /// Maximum size of a single document, in megabytes. Larger files are skipped
+    /// (a huge file would be read fully into memory and could exhaust it).
+    /// 0 or less disables the limit.
+    /// </summary>
+    public int MaxFileSizeMb { get; set; } = 100;
+
+    /// <summary>
+    /// Maximum number of distinct documents kept in the index. Once reached, new
+    /// files are skipped (existing files can still be re-indexed). 0 or less = no limit.
+    /// </summary>
+    public int MaxIndexedFiles { get; set; } = 100;
+
+    /// <summary>Per-file byte limit derived from <see cref="MaxFileSizeMb"/> (long.MaxValue if disabled).</summary>
+    public long MaxFileSizeBytes => MaxFileSizeMb > 0 ? MaxFileSizeMb * 1024L * 1024L : long.MaxValue;
+
+    /// <summary>
     /// Quiet period (ms) a file must be idle after its last change event before it is
     /// (re)indexed. File systems fire several events per save; this debounces them.
     /// </summary>

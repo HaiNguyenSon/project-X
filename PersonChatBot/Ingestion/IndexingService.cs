@@ -47,12 +47,36 @@ public sealed class IndexingService
         if (!_extraction.IsSupported(filePath) || !File.Exists(filePath))
             return IndexOutcome.Unsupported;
 
+        // Reject oversized files before reading them, so a huge file can't exhaust memory.
+        var sizeBytes = new FileInfo(filePath).Length;
+        if (sizeBytes > _options.MaxFileSizeBytes)
+        {
+            await _store.DeleteFileAsync(filePath, ct); // drop stale chunks if it grew past the limit
+            _logger.LogWarning(
+                "Skipping {File}: {SizeMb:F1} MB exceeds the {LimitMb} MB limit.",
+                filePath, sizeBytes / 1024d / 1024d, _options.MaxFileSizeMb);
+            return IndexOutcome.TooLarge;
+        }
+
         var hash = await ComputeFileHashAsync(filePath, ct);
         var existing = await _store.GetFileHashAsync(filePath, ct);
         if (existing == hash)
         {
             _logger.LogDebug("Skipping unchanged file {File}.", filePath);
             return IndexOutcome.Unchanged;
+        }
+
+        // Enforce the document cap for NEW files (already-indexed files may still update).
+        if (existing is null && _options.MaxIndexedFiles > 0)
+        {
+            var stats = await _store.GetStatsAsync(ct);
+            if (stats.FileCount >= _options.MaxIndexedFiles)
+            {
+                _logger.LogWarning(
+                    "Skipping {File}: index already holds the maximum of {Limit} documents.",
+                    filePath, _options.MaxIndexedFiles);
+                return IndexOutcome.LimitReached;
+            }
         }
 
         var pages = await _extraction.ExtractAsync(filePath, ct);
@@ -98,8 +122,9 @@ public sealed class IndexingService
             .Where(_extraction.IsSupported)
             .ToList();
 
-        int indexed = 0, skipped = 0, removed = 0;
+        int indexed = 0, skipped = 0, removed = 0, overLimit = 0;
         var noText = new List<string>();
+        var oversized = new List<string>();
         var errors = new List<string>();
 
         foreach (var file in onDisk)
@@ -112,6 +137,8 @@ public sealed class IndexingService
                     case IndexOutcome.Indexed: indexed++; break;
                     case IndexOutcome.Unchanged: skipped++; break;
                     case IndexOutcome.NoExtractableText: noText.Add(Path.GetFileName(file)); break;
+                    case IndexOutcome.TooLarge: oversized.Add(Path.GetFileName(file)); break;
+                    case IndexOutcome.LimitReached: overLimit++; break;
                 }
             }
             catch (Exception ex)
@@ -136,9 +163,10 @@ public sealed class IndexingService
         var stats = await _store.GetStatsAsync(ct);
 
         _logger.LogInformation(
-            "Reindex complete: {Indexed} indexed, {Skipped} skipped, {Removed} removed, {NoText} with no text.",
-            indexed, skipped, removed, noText.Count);
-        return new IndexReport(indexed, skipped, removed, stats.ChunkCount, noText, errors);
+            "Reindex complete: {Indexed} indexed, {Skipped} skipped, {Removed} removed, " +
+            "{NoText} with no text, {Oversized} too large, {OverLimit} over the file limit.",
+            indexed, skipped, removed, noText.Count, oversized.Count, overLimit);
+        return new IndexReport(indexed, skipped, removed, stats.ChunkCount, noText, oversized, overLimit, errors);
     }
 
     private static async Task<string> ComputeFileHashAsync(string filePath, CancellationToken ct)

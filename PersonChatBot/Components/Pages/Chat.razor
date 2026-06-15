@@ -88,6 +88,18 @@
                         @_reindexReport.NoTextFiles.Count file(s) had no extractable text (scanned PDF?)
                     </span>
                 }
+                @if (_reindexReport.OversizedFiles.Count > 0)
+                {
+                    <span class="chat-errors" title="@string.Join(", ", _reindexReport.OversizedFiles)">
+                        @_reindexReport.OversizedFiles.Count file(s) skipped (too large)
+                    </span>
+                }
+                @if (_reindexReport.FilesOverLimit > 0)
+                {
+                    <span class="chat-errors">
+                        @_reindexReport.FilesOverLimit file(s) skipped (100-document limit)
+                    </span>
+                }
                 @if (_reindexReport.Errors.Count > 0)
                 {
                     <span class="chat-errors">@_reindexReport.Errors.Count error(s)</span>
@@ -204,7 +216,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Reindex failed.");
-            _reindexReport = new IndexReport(0, 0, 0, 0, [], new[] { ex.Message });
+            _reindexReport = new IndexReport(0, 0, 0, 0, [], [], 0, new[] { ex.Message });
         }
         finally
         {

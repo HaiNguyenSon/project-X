@@ -12,18 +12,22 @@ public class IndexingServiceTests
     private const int Dim = 8;
 
     /// <summary>Build the real ingestion graph over a temp folder + temp db with a fake embedder.</summary>
-    private static async Task WithIndexing(Func<string, IndexingService, IVectorStore, Task> body)
+    private static async Task WithIndexing(
+        Func<string, IndexingService, IVectorStore, Task> body,
+        Action<RagOptions>? configure = null)
     {
         var folder = Path.Combine(Path.GetTempPath(), $"pcbdocs_{Guid.NewGuid():N}");
         Directory.CreateDirectory(folder);
         var dbPath = Path.Combine(Path.GetTempPath(), $"pcbidx_{Guid.NewGuid():N}.db");
 
-        var options = TestSupport.Options(new RagOptions
+        var ragOptions = new RagOptions
         {
             DocumentsFolder = folder,
             DatabasePath = dbPath,
             EmbeddingDimensions = Dim,
-        });
+        };
+        configure?.Invoke(ragOptions);
+        var options = TestSupport.Options(ragOptions);
 
         var extraction = new TextExtractionService(new ITextExtractor[]
         {
@@ -116,6 +120,37 @@ public class IndexingServiceTests
         Assert.Equal(1, report.FilesIndexed);
         Assert.Equal("blank.md", Assert.Single(report.NoTextFiles));
     });
+
+    [Fact]
+    public Task File_larger_than_the_size_limit_is_skipped() => WithIndexing(async (folder, indexing, store) =>
+    {
+        var path = Path.Combine(folder, "huge.txt");
+        await File.WriteAllTextAsync(path, new string('x', 2 * 1024 * 1024)); // 2 MB, limit is 1 MB
+
+        Assert.Equal(IndexOutcome.TooLarge, await indexing.IndexFileAsync(path));
+        Assert.Equal(0, (await store.GetStatsAsync()).FileCount);
+    }, configure: o => o.MaxFileSizeMb = 1);
+
+    [Fact]
+    public Task New_files_beyond_the_document_limit_are_skipped() => WithIndexing(async (folder, indexing, store) =>
+    {
+        var a = Path.Combine(folder, "a.txt");
+        var b = Path.Combine(folder, "b.txt");
+        var c = Path.Combine(folder, "c.txt");
+        await File.WriteAllTextAsync(a, "first document");
+        await File.WriteAllTextAsync(b, "second document");
+        await File.WriteAllTextAsync(c, "third document");
+
+        Assert.Equal(IndexOutcome.Indexed, await indexing.IndexFileAsync(a));
+        Assert.Equal(IndexOutcome.Indexed, await indexing.IndexFileAsync(b));
+        Assert.Equal(IndexOutcome.LimitReached, await indexing.IndexFileAsync(c)); // at capacity
+        Assert.Equal(2, (await store.GetStatsAsync()).FileCount);
+
+        // An already-indexed file can still be re-indexed even at the limit.
+        await File.WriteAllTextAsync(a, "first document, edited");
+        Assert.Equal(IndexOutcome.Indexed, await indexing.IndexFileAsync(a));
+        Assert.Equal(2, (await store.GetStatsAsync()).FileCount);
+    }, configure: o => o.MaxIndexedFiles = 2);
 
     [Fact]
     public Task ReindexAll_indexes_supported_files_and_ignores_others() => WithIndexing(async (folder, indexing, store) =>

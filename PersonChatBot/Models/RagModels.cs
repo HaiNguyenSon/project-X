@@ -37,6 +37,10 @@ public enum IndexOutcome
     Unchanged,
     /// <summary>No extractable text (e.g. a scanned/image-only PDF); not indexed.</summary>
     NoExtractableText,
+    /// <summary>File is larger than the configured size limit; not indexed.</summary>
+    TooLarge,
+    /// <summary>The indexed-file limit is reached and this is a new file; not indexed.</summary>
+    LimitReached,
     /// <summary>File type isn't supported, or the file no longer exists.</summary>
     Unsupported,
 }
@@ -48,4 +52,6 @@ public sealed record IndexReport(
     int FilesRemoved,
     int ChunksWritten,
     IReadOnlyList<string> NoTextFiles,
+    IReadOnlyList<string> OversizedFiles,
+    int FilesOverLimit,
     IReadOnlyList<string> Errors);
