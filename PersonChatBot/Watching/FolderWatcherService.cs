@@ -36,8 +36,21 @@ public sealed class FolderWatcherService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var folder = _indexing.DocumentsFolder;
-        Directory.CreateDirectory(folder);
+        string folder;
+        try
+        {
+            folder = _indexing.DocumentsFolder;
+            Directory.CreateDirectory(folder);
+        }
+        catch (Exception ex)
+        {
+            // A misconfigured/unavailable documents folder must not crash the whole app
+            // (an unhandled exception here would stop the host). Disable watching instead.
+            _logger.LogError(ex,
+                "Cannot access the documents folder; file indexing/watching is disabled. " +
+                "Check the Rag:DocumentsFolder setting.");
+            return;
+        }
 
         // 1) One-time full index on startup.
         try
@@ -55,19 +68,30 @@ public sealed class FolderWatcherService : BackgroundService
         }
 
         // 2) Watch for changes.
-        using var watcher = new FileSystemWatcher(folder)
+        FileSystemWatcher watcher;
+        try
         {
-            IncludeSubdirectories = true,
-            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
-        };
-        watcher.Created += OnChanged;
-        watcher.Changed += OnChanged;
-        watcher.Deleted += OnChanged;
-        watcher.Renamed += OnRenamed;
-        watcher.Error += OnError;
-        watcher.EnableRaisingEvents = true;
+            watcher = new FileSystemWatcher(folder)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+            };
+            watcher.Created += OnChanged;
+            watcher.Changed += OnChanged;
+            watcher.Deleted += OnChanged;
+            watcher.Renamed += OnRenamed;
+            watcher.Error += OnError;
+            watcher.EnableRaisingEvents = true;
+        }
+        catch (Exception ex)
+        {
+            // Startup indexing already ran; only live watching is lost. Don't crash the host.
+            _logger.LogError(ex, "Failed to start the file watcher on {Folder}; live watching disabled.", folder);
+            return;
+        }
 
         _logger.LogInformation("Watching {Folder} for changes.", folder);
+        using var _watcher = watcher;
 
         // 3) Debounce loop: process paths that have been quiet long enough.
         var debounce = TimeSpan.FromMilliseconds(_options.WatchDebounceMs);
