@@ -141,6 +141,13 @@ public sealed class IndexingService
                     case IndexOutcome.LimitReached: overLimit++; break;
                 }
             }
+            catch (EmbeddingServiceUnavailableException)
+            {
+                // The embedder is down, so every remaining file would fail identically.
+                // Abort the whole pass with the single actionable message rather than
+                // logging the same connectivity error once per file.
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to index {File}.", file);
