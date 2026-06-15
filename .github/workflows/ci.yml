@@ -25,3 +25,13 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+
+      - name: Check for vulnerable packages
+        shell: pwsh
+        run: |
+          $output = dotnet list package --vulnerable --include-transitive 2>&1 | Out-String
+          Write-Host $output
+          if ($output -match 'has the following vulnerable packages') {
+              Write-Error 'Vulnerable NuGet packages detected (see list above).'
+              exit 1
+          }

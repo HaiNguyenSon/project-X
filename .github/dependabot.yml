@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Batch the many Semantic Kernel / Extensions packages into one PR.
+      microsoft-extensions-and-sk:
+        patterns:
+          - "Microsoft.SemanticKernel*"
+          - "Microsoft.Extensions.*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
