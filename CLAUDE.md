@@ -44,9 +44,13 @@ RAG pipeline in one process. Two flows meet at the SQLite vector store:
 `ITextExtractor` (Pdf/Docx/PlainText, dispatched by `TextExtractionService`) → `Chunker` →
 `EmbeddingService.EmbedDocumentsAsync` → `IVectorStore.UpsertFileAsync`.
 `FolderWatcherService` is a `BackgroundService` that does a full re-index on startup, then
-watches the folder (debounced, with bounded retry for files still being copied).
-`IndexingService` is idempotent: it skips files whose content hash is unchanged and returns an
-`IndexOutcome` (Indexed / Unchanged / NoExtractableText / Unsupported).
+watches the folder (debounced). It retries only *transient* errors (file locked / still being
+copied — see `IsTransient`); corrupt/format errors are logged once, not retried. Its startup and
+watcher setup are wrapped so a bad `DocumentsFolder` can't crash the host (and `HostOptions`
+sets `BackgroundServiceExceptionBehavior.Ignore` as a backstop).
+`IndexingService` is idempotent: it skips files whose content hash is unchanged, enforces the
+`MaxFileSizeMb` (default 100) and `MaxIndexedFiles` (default 100) limits, and returns an
+`IndexOutcome` (Indexed / Unchanged / NoExtractableText / TooLarge / LimitReached / Unsupported).
 
 **Query** (`Chat.razor` → `ChatService`):
 `RetrievalService` embeds the question (`EmbeddingService.EmbedQueryAsync`) → `IVectorStore.SearchAsync`
@@ -84,3 +88,5 @@ answer from Ollama via Semantic Kernel's `IChatCompletionService`, with citation
 Tests use a deterministic `FakeEmbeddingGenerator` (no Ollama) and a real `SqliteVecStore` on a
 temp db, so the actual sqlite-vec SQL is exercised. When testing storage with fabricated vectors,
 set `RagOptions.EmbeddingDimensions` to match the vector length you construct (see `TestSupport`).
+The main project exposes internals to the test project via `InternalsVisibleTo("PersonChatBot.Tests")`,
+so internal helpers (e.g. `FolderWatcherService.IsTransient`) can be unit-tested directly.
